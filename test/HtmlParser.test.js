@@ -4,13 +4,12 @@ const { describe, it } = require("mocha");
 const { EOL } = require("os");
 const { expect } = require("chai");
 const { parse, theyBoth, theyBothWithPreserveWSOption } = require("./helpers");
-const { Transform } = require("stream");
 const HtmlParser = require("../src/HtmlParser");
 
 describe("HtmlParser", () => {
-  it("should create an instance of a stream Transform", () => {
+  it("should create an instance of HtmlParser", () => {
     const parser = new HtmlParser();
-    expect(parser).to.be.an.instanceOf(Transform);
+    expect(parser).to.be.an.instanceOf(HtmlParser);
   });
   describe("ignores trivial html files", () => {
     it("should not capture any tokens from empty files", (done) => {
@@ -259,38 +258,64 @@ describe("HtmlParser", () => {
       done();
     });
   });
+  class TinyController {
+    constructor() {
+      this.timesEnqueueCalled = 0;
+      this.output = "";
+    }
+    enqueue(chunk) {
+      const { name, data, text } = chunk;
+      this.timesEnqueueCalled++;
+      if (text) {
+        // is a text node
+        this.output += text;
+      } else if (name && data) {
+        // is an opening tag with potential attributes
+        this.output += `<${name}>`;
+      } else {
+        // is a closing tag
+        this.output += `</${name}>`;
+      }
+    }
+    reset() {
+      this.timesEnqueueCalled = 0;
+      this.output = "";
+    }
+  }
   describe("correctly cleans up state", () => {
     it("should not flush pending text if the stream hasn't ended", () => {
-      let calledData = 0;
       const parser = new HtmlParser();
-      parser.on("data", () => calledData++);
-      parser.write("some pending text");
-      expect(calledData).to.equal(0);
+      const tinyController = new TinyController();
+      parser.transform("some pending text", tinyController);
+      expect(tinyController.timesEnqueueCalled).to.equal(0);
     });
     it("should flush pending text if the stream was ended", () => {
-      let calledData = 0;
       const parser = new HtmlParser();
-      parser.on("data", (data) => {
-        calledData++;
-        expect(data.text).to.equal("some pending text");
-      });
-      parser.end("some pending text");
-      expect(calledData).to.equal(1);
+      const tinyController = new TinyController();
+      parser.transform("some pending text", tinyController);
+      parser.flush(tinyController);
+      expect(tinyController.timesEnqueueCalled).to.equal(1);
+      expect(tinyController.output).to.equal("some pending text");
     });
     it("should forget a pending node if reset is called", () => {
-      let calledData = 0;
       const parser = new HtmlParser();
-      parser.on("data", (data) => {
-        if (++calledData === 1) {
-          expect(data.text).to.equal("some text");
-        } else {
-          expect(data.name).to.equal("p");
-        }
-      });
-      parser.write("<di");
+      const tinyController = new TinyController();
+      expect(tinyController.timesEnqueueCalled).to.equal(0);
+      expect(tinyController.output).to.equal("");
+
+      parser.transform("<di>", tinyController);
+      expect(tinyController.timesEnqueueCalled).to.equal(1);
+      expect(tinyController.output).to.equal("<di>");
+
       parser.reset();
-      parser.write("some text <p>");
-      expect(calledData).to.equal(2);
+      tinyController.reset();
+      expect(tinyController.timesEnqueueCalled).to.equal(0);
+      expect(tinyController.output).to.equal("");
+
+      parser.transform("some text <p>", tinyController);
+      parser.flush(tinyController);
+      expect(tinyController.timesEnqueueCalled).to.equal(2);
+      expect(tinyController.output).to.equal("some text<p>");
     });
   });
   describe("preserve whitespace option", () => {

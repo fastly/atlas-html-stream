@@ -4,6 +4,8 @@
     "mocha": true
   },
   "globals": {
-    "expect": false
+    "ByteLengthQueuingStrategy": "readonly",
+    "expect": "readonly",
+    "TransformStream": "readonly"
   }
 }

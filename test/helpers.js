@@ -1,6 +1,7 @@
 "use strict";
 
-const { createReadStream } = require("fs");
+const { open } = require("node:fs/promises");
+const { Readable } = require("node:stream");
 const { it } = require("mocha");
 const { join } = require("path");
 const assetRoot = join(__dirname, "assets");
@@ -30,17 +31,24 @@ function theyBothWithPreserveWSOption(should, name, preserveWS = true, test) {
 }
 
 // parse a file and return a list of results
-function parse({ name, highWaterMark, preserveWS }, cb) {
-  const opts = highWaterMark ? { highWaterMark } : undefined;
-  const file = createReadStream(join(assetRoot, name), opts);
-  let calledCb = 0;
-  file.on("error", (err) => {
-    !calledCb++ && cb(err);
-  });
+async function parse({ name, highWaterMark, preserveWS }, cb) {
+  const file = await open(join(assetRoot, name));
+  const transform = new TransformStream(new HtmlParser({ preserveWS }));
+  const options = highWaterMark ? { highWaterMark } : {};
+  options.encoding = "utf-8";
+  const readableStream = Readable.toWeb(file.createReadStream(options));
+  const transformedStream = readableStream.pipeThrough(transform);
+
   const results = [];
-  file.pipe(new HtmlParser({ preserveWS })).on("data", (data) => {
-    results.push(data);
-  }).on("end", () => {
-    !calledCb++ && cb(null, results);
-  });
+  const reader = transformedStream.getReader();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    } else {
+      results.push(value);
+    }
+  }
+  await file.close();
+  cb(null, results);
 }

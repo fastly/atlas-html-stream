@@ -32,7 +32,7 @@
     "nyc": "^15.1.0"
   },
   "engines": {
-    "node": ">=10.1.0"
+    "node": ">=18.0.0"
   },
   "homepage": "https://github.com/BonnierNews/atlas-html-stream#readme",
   "bugs": "https://github.com/BonnierNews/atlas-html-stream/issues",

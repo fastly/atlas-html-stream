@@ -1,6 +1,5 @@
 "use strict";
 
-const { Transform } = require("stream");
 const { TEXT, NODE, NAME, KEY, VALUE, SCRIPT, STYLE, COMMENT } = require("./states");
 
 class SeqMatcher {
@@ -19,9 +18,8 @@ class SeqMatcher {
   }
 }
 
-module.exports = class HtmlParser extends Transform {
+module.exports = class HtmlParser {
   constructor({ preserveWS } = {}) {
-    super({ readableObjectMode: true });
     this.preserveWS = preserveWS;
     this.endScript = new SeqMatcher("</script>");
     this.endStyle = new SeqMatcher("</style>");
@@ -64,7 +62,7 @@ module.exports = class HtmlParser extends Transform {
     this.hasEqual = false;
     this.valStartChar = null;
   }
-  _transform(chunk, encoding, done) {
+  transform(chunk, controller) {
     const cache = this.cache += chunk;
     const cacheLen = cache.length;
 
@@ -77,7 +75,7 @@ module.exports = class HtmlParser extends Transform {
             if (v < i) this.text.push(cache.substring(v, i));
             v = i + 1;
           } else if (c === 60) { // <
-            this.flushText(v, i);
+            this.flushText(controller, v, i);
             s = NODE;
             v = i + 1;
           }
@@ -86,7 +84,7 @@ module.exports = class HtmlParser extends Transform {
         case NODE: {
           if (c === 62) { // >
             if (this.key) this.flushKey();
-            s = this.flushNode();
+            s = this.flushNode(controller);
             v = i + 1;
           } else if (c === 47 && !this.hasEqual) { // /
             this.isClose = !(this.isSelfClose = !!this.name);
@@ -118,7 +116,7 @@ module.exports = class HtmlParser extends Transform {
         case NAME: {
           if (this.beginComment.found(c)) { // start comment
             this.name = cache.substring(v, i + 1);
-            s = this.flushNode();
+            s = this.flushNode(controller);
             v = i + 1;
           } else if (c === 32 || c >= 9 && c <= 13) { // ws
             this.name = cache.substring(v, i);
@@ -131,7 +129,7 @@ module.exports = class HtmlParser extends Transform {
             v = i + 1;
           } else if (c === 62) { // >
             this.name = cache.substring(v, i);
-            s = this.flushNode();
+            s = this.flushNode(controller);
             v = i + 1;
           }
           break;
@@ -153,7 +151,7 @@ module.exports = class HtmlParser extends Transform {
             v = i + 1;
           } else if (c === 62) { // >
             this.flushKey(v, i);
-            s = this.flushNode();
+            s = this.flushNode(controller);
             v = i + 1;
           }
           break;
@@ -171,20 +169,20 @@ module.exports = class HtmlParser extends Transform {
             v = i + 1;
           } else if (c === 62) { // >
             this.flushVal(v, i);
-            s = this.flushNode();
+            s = this.flushNode(controller);
             v = i + 1;
           }
           break;
         }
         default: {
           if (s === COMMENT && this.endComment.found(c)) {
-            s = this.flushSpecialNode(v, i - 2, "!--");
+            s = this.flushSpecialNode(controller, v, i - 2, "!--");
             v = i + 1;
           } else if (s === SCRIPT && this.endScript.found(c)) {
-            s = this.flushSpecialNode(v, i - 8, "script");
+            s = this.flushSpecialNode(controller, v, i - 8, "script");
             v = i + 1;
           } else if (s === STYLE && this.endStyle.found(c)) {
-            s = this.flushSpecialNode(v, i - 7, "style");
+            s = this.flushSpecialNode(controller, v, i - 7, "style");
             v = i + 1;
           }
         }
@@ -196,13 +194,10 @@ module.exports = class HtmlParser extends Transform {
     this.curPos = i - v;
     this.minPos = 0;
     this.state = s;
-
-    done(null);
   }
-  _flush(done) {
-    this.flushText(this.minPos, this.curPos);
+  flush(controller) {
+    this.flushText(controller, this.minPos, this.curPos);
     this.reset();
-    done(null);
   }
   flushKey(v, i) {
     this.key = this.data[this.key || this.cache.substring(v, i)] = "";
@@ -212,10 +207,10 @@ module.exports = class HtmlParser extends Transform {
     this.key = "";
     this.valStartChar = this.hasEqual = null;
   }
-  flushNode() {
+  flushNode(controller) {
     const name = this.name;
-    if (!this.isClose) this.push({ name, data: this.data });
-    if (this.isSelfClose || this.isClose) this.push({ name });
+    if (!this.isClose) controller.enqueue({ name, data: this.data });
+    if (this.isSelfClose || this.isClose) controller.enqueue({ name });
     let s;
     switch (name) {
       case "script":
@@ -236,19 +231,19 @@ module.exports = class HtmlParser extends Transform {
     this.isSelfClose = false;
     return s;
   }
-  flushSpecialNode(v, i, name) {
+  flushSpecialNode(controller, v, i, name) {
     const text = this.cache.substring(v, i);
-    if (text) this.push({ text });
-    this.push({ name });
+    if (text) controller.enqueue({ text });
+    controller.enqueue({ name });
     return TEXT;
   }
-  flushText(v, i) {
+  flushText(controller, v, i) {
     if (v < i) {
       this.text.push(this.cache.substring(v, i));
-      this.push({ text: this.text.join(" ") });
+      controller.enqueue({ text: this.text.join(" ") });
       this.text.length = 0;
     } else if (this.text.length) {
-      this.push({ text: this.text.join(" ") });
+      controller.enqueue({ text: this.text.join(" ") });
       this.text.length = 0;
     }
   }
