@@ -260,26 +260,13 @@ describe("HtmlParser", () => {
   });
   class TinyController {
     constructor() {
-      this.timesEnqueueCalled = 0;
-      this.output = "";
+      this.queue = [];
     }
     enqueue(chunk) {
-      const { name, data, text } = chunk;
-      this.timesEnqueueCalled++;
-      if (text) {
-        // is a text node
-        this.output += text;
-      } else if (name && data) {
-        // is an opening tag with potential attributes
-        this.output += `<${name}>`;
-      } else {
-        // is a closing tag
-        this.output += `</${name}>`;
-      }
+      this.queue.push(chunk);
     }
     reset() {
-      this.timesEnqueueCalled = 0;
-      this.output = "";
+      this.queue.length = 0;
     }
   }
   describe("correctly cleans up state", () => {
@@ -287,35 +274,35 @@ describe("HtmlParser", () => {
       const parser = new HtmlParser();
       const tinyController = new TinyController();
       parser.transform("some pending text", tinyController);
-      expect(tinyController.timesEnqueueCalled).to.equal(0);
+      expect(tinyController.queue.length).to.equal(0);
     });
     it("should flush pending text if the stream was ended", () => {
       const parser = new HtmlParser();
       const tinyController = new TinyController();
       parser.transform("some pending text", tinyController);
       parser.flush(tinyController);
-      expect(tinyController.timesEnqueueCalled).to.equal(1);
-      expect(tinyController.output).to.equal("some pending text");
+      expect(tinyController.queue.length).to.equal(1);
+      expect(tinyController.queue).to.deep.equal([{ text: "some pending text" }]);
     });
     it("should forget a pending node if reset is called", () => {
       const parser = new HtmlParser();
       const tinyController = new TinyController();
-      expect(tinyController.timesEnqueueCalled).to.equal(0);
-      expect(tinyController.output).to.equal("");
+      expect(tinyController.queue.length).to.equal(0);
+      expect(tinyController.queue).to.deep.equal([]);
 
       parser.transform("<di>", tinyController);
-      expect(tinyController.timesEnqueueCalled).to.equal(1);
-      expect(tinyController.output).to.equal("<di>");
+      expect(tinyController.queue.length).to.equal(1);
+      expect(tinyController.queue).to.deep.equal([{ name: "di", data: {} }]);
 
       parser.reset();
       tinyController.reset();
-      expect(tinyController.timesEnqueueCalled).to.equal(0);
-      expect(tinyController.output).to.equal("");
+      expect(tinyController.queue.length).to.equal(0);
+      expect(tinyController.queue).to.deep.equal([]);
 
       parser.transform("some text <p>", tinyController);
       parser.flush(tinyController);
-      expect(tinyController.timesEnqueueCalled).to.equal(2);
-      expect(tinyController.output).to.equal("some text<p>");
+      expect(tinyController.queue.length).to.equal(2);
+      expect(tinyController.queue).to.deep.equal([{text: "some text"}, { name: "p", data: {} }]);
     });
   });
   describe("preserve whitespace option", () => {
